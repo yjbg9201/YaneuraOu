@@ -154,7 +154,9 @@ namespace {
 
 // golden ファイルの FNV-1a 32bit (CR を除いたバイト列)。tatara 側の
 // crates/shogi-features/tests/nyugyoku_scalar.rs の GOLDEN_FNV1A32 と同じ値。
-// ファイルを更新したら両リポのコピーとこの値をそろえて更新する。
+// golden ファイルは tatara の scripts/gen-nyugyoku-scalar-golden.py で生成する
+// (--yaneuraou でこのリポのコピーも書く)。再生成したら、スクリプトが表示する値に
+// 両リポの定数をそろえる。
 constexpr std::uint32_t kGoldenFnv1a32 = 0xE063FF67u;
 
 std::uint32_t fnv1a32_without_cr(const std::string& bytes) {
