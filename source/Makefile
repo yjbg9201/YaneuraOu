@@ -14,6 +14,8 @@
 # YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_32 : NNUE型評価関数(halfkp_1024x2-8-32)
 # YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_64 : NNUE型評価関数(halfkp_1024x2-8-64)
 # YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32 : NNUE型評価関数(halfkp_vm_256x2-32-32)
+# YANEURAOU_ENGINE_NNUE_HALFKP_NYUGYOKU_256X2_32_32 : NNUE型評価関数(halfkp_256x2-32-32 の L1 入力に入玉スカラー 96 個を連結)
+#                                                     入玉ルールは NYUGYOKU_RULE、符号化は NYUGYOKU_ENCODING で選ぶ
 # YANEURAOU_ENGINE_SFNN1536 : SFNN without PSQT 1536 (== YANEURAOU_ENGINE_SFNN_halfkahm2_1536_15_32_k3k3)
 # // ⇨ 上記以外のアーキテクチャのNNUE評価関数用のやねうら王をビルドしたい時は、
 # //   やねうら王のビルド手順 - やねうら王 Wiki
@@ -155,6 +157,11 @@ COMPILER_MACHINE := $(shell $(COMPILER) -dumpmachine 2>/dev/null)
 #  2 : …
 # cf.【連載】評価関数を作ってみよう！その1 : http://yaneuraou.yaneu.com/2020/11/17/make-evaluate-function/
 MATERIAL_LEVEL = 1
+
+# YANEURAOU_ENGINE_NNUE_HALFKP_NYUGYOKU_256X2_32_32 のときにネットに固定する入玉ルールと符号化。
+# 学習器 tatara の simple --nyugyoku-rule / --nyugyoku-encoding と同じ値にする。
+NYUGYOKU_RULE = csa27
+NYUGYOKU_ENCODING = thermometer
 
 # NNUE評価関数を実行ファイルに内蔵する。 ビルドするときにsourceフォルダ直下に"nn.bin"を配置する。
 EVAL_EMBEDDING = OFF
@@ -454,6 +461,21 @@ ifneq (,$(IS_NNUE_EDITION))
 
 		else ifeq ($(ENGINE_ARCH_UPPER),NNUE_HALFKP_VM_256X2_32_32)
 			CPPFLAGS += -DEVAL_NNUE_HALFKP_VM_256X2_32_32
+
+		else ifeq ($(ENGINE_ARCH_UPPER),NNUE_HALFKP_NYUGYOKU_256X2_32_32)
+			# L1 入力に入玉スカラーを連結する型。ネットに固定する入玉ルールと符号化は
+			# NYUGYOKU_RULE (csa27 / csa24) と NYUGYOKU_ENCODING (thermometer / onehot) で選ぶ。
+			CPPFLAGS += -DEVAL_NNUE_HALFKP_NYUGYOKU_256X2_32_32
+			ifeq ($(NYUGYOKU_RULE),csa24)
+				CPPFLAGS += -DNNUE_NYUGYOKU_RULE_CSA24
+			else ifneq ($(NYUGYOKU_RULE),csa27)
+        $(error NYUGYOKU_RULE must be csa27 or csa24 (got '$(NYUGYOKU_RULE)'))
+			endif
+			ifeq ($(NYUGYOKU_ENCODING),onehot)
+				CPPFLAGS += -DNNUE_NYUGYOKU_ENCODING_ONEHOT
+			else ifneq ($(NYUGYOKU_ENCODING),thermometer)
+        $(error NYUGYOKU_ENCODING must be thermometer or onehot (got '$(NYUGYOKU_ENCODING)'))
+			endif
 
 		else ifeq ($(ENGINE_ARCH_UPPER),SFNN1536)
 			CPPFLAGS += -DYANEURAOU_ENGINE_SFNN1536

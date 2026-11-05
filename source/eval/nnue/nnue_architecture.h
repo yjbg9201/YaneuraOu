@@ -52,6 +52,11 @@
 // SFNN without Psqt 1536型
 #include "architectures/sfnn-1536.h"
 
+#elif defined(EVAL_NNUE_HALFKP_NYUGYOKU_256X2_32_32)
+
+// halfkp_256x2-32-32 の L1 入力に入玉スカラー 96 個を連結した型
+#include "architectures/halfkp_nyugyoku_256x2-32-32.h"
+
 #elif defined(EVAL_NNUE_HALFKP_VM_256X2_32_32)
 
 // halfkpvm_256x2-32-32型

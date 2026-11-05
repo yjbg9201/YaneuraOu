@@ -160,6 +160,11 @@ namespace Progress {
 	// 評価関数パラメータを書き込む
 	bool WriteParameters(std::ostream& stream);
 
+#if defined(ENABLE_TEST_CMD) && !defined(SFNNwoPSQT)
+	// 出力層の生の値 (FV_SCALE で割る前)。accumulator を作り直して計算する。
+	std::int64_t ComputeRawOutputForTest(const Position& pos);
+#endif
+
 } // namespace Eval::NNUE
 } // namespace YaneuraOu
 

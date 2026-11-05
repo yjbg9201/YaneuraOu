@@ -21,6 +21,12 @@ struct alignas(64) Accumulator {
   Value score = VALUE_ZERO;
   bool computed_accumulation = false;
   bool computed_score = false;
+#if defined(NNUE_HAS_NYUGYOKU_SCALAR_INPUT)
+  // 玉ごと (添字は玉の持ち主の色) の、入玉スカラーの L1 寄与の表引きに使う値。
+  // 直前の手で変わり得ない玉は親局面の値を引き継ぐ (evaluate_nnue.cpp の TransformInput)。
+  Features::NyugyokuScalar::L1Inputs nyugyoku_inputs[COLOR_NB];
+  bool computed_nyugyoku = false;
+#endif
 };
 
 } // namespace Eval::NNUE
