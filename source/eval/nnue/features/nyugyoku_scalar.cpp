@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../../../misc.h"
+#include "../../../position.h"
 #include "../../../testcmd/unit_test.h"
 
 namespace YaneuraOu {

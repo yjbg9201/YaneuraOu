@@ -320,7 +320,17 @@ namespace {
 			if (!stream) return Tools::ResultCode::FileReadError;
 			// hash値、古い評価関数ファイルに対して一致するとは限らないので、警告に変更する。
 			if (header != T::GetHashValue())
+			{
+#if defined(NNUE_STRICT_HASH_CHECK)
+				// 層の構成 (入力次元・入玉ルールなど) が違うファイルを読み進めると値が
+				// 壊れるだけなので、このアーキテクチャでは読み込みを止める。
+				sync_cout << "info string Error : nn.bin hash mismatch: expected "
+				          << T::GetHashValue() << " got " << header << sync_endl;
+				return Tools::ResultCode::FileMismatch;
+#else
 				sync_cout << "info string Warning : nn.bin hash mismatch." << sync_endl;
+#endif
+			}
 			return obj.ReadParameters(stream);
 		}
 
@@ -359,11 +369,20 @@ namespace {
         }
 #endif
 		if (hash_value != kHashValue) {
+#if defined(NNUE_STRICT_HASH_CHECK)
+			sync_cout << "info string Error: NNUE hash mismatch: expected " << kHashValue
+				<< " got " << hash_value
+				<< " arch_in_file=" << architecture
+				<< " arch_expected=" << GetArchitectureString()
+				<< sync_endl;
+			return Tools::ResultCode::FileMismatch;
+#else
 			sync_cout << "info string Warning: NNUE hash mismatch: expected " << kHashValue
 				<< " got " << hash_value
 				<< " arch_in_file=" << architecture
 				<< " arch_expected=" << GetArchitectureString()
 				<< sync_endl;
+#endif
 		}
 
 		result = Detail::ReadParameters<FeatureTransformer>(stream, tmp->feature_transformer);
@@ -776,6 +795,33 @@ namespace {
     }
 #endif
 
+#if !defined(SFNNwoPSQT)
+    // L1 の入力 (FT 出力。入玉スカラーを連結する型ではその直後に入玉スカラー) を作る。
+#if defined(NNUE_HAS_NYUGYOKU_SCALAR_INPUT)
+    constexpr std::size_t kNetworkInputBufferSize = Layers::InputLayer::kOutputDimensions;
+    static_assert(Layers::InputLayer::kFtDimensions == FeatureTransformer::kOutputDimensions);
+#else
+    constexpr std::size_t kNetworkInputBufferSize = FeatureTransformer::kBufferSize;
+#endif
+    static void TransformInput(const Position& pos, TransformedFeatureType* output, bool refresh) {
+        networks().feature_transformer.Transform(pos, output, refresh);
+#if defined(NNUE_HAS_NYUGYOKU_SCALAR_INPUT)
+        Features::NyugyokuScalar::compute(pos, Layers::kNyugyokuRule, Layers::kNyugyokuEncoding,
+                                          output + FeatureTransformer::kOutputDimensions);
+#endif
+    }
+
+#if defined(ENABLE_TEST_CMD)
+    // 出力層の生の値 (FV_SCALE で割る前)。学習器の量子化 CPU forward との突合に使う。
+    std::int64_t ComputeRawOutputForTest(const Position& pos) {
+        alignas(kCacheLineSize) char buffer[Network::kBufferSize];
+        alignas(kCacheLineSize) TransformedFeatureType transformed_features[kNetworkInputBufferSize];
+        TransformInput(pos, transformed_features, true);
+        return networks().network[0].Propagate(transformed_features, buffer)[0];
+    }
+#endif
+#endif
+
     // 評価値を計算する
     static Value ComputeScore(const Position& pos, bool refresh = false) {
         auto& accumulator = pos.state()->accumulator;
@@ -798,8 +844,8 @@ namespace {
 #endif
 #else
         alignas(kCacheLineSize) TransformedFeatureType
-            transformed_features[FeatureTransformer::kBufferSize];
-        networks().feature_transformer.Transform(pos, transformed_features, refresh);
+            transformed_features[kNetworkInputBufferSize];
+        TransformInput(pos, transformed_features, refresh);
         const auto output = networks().network[0].Propagate(transformed_features, buffer);
 #endif
 
@@ -889,6 +935,21 @@ void prefetch_evalhash(const Key key) {
 
 // 評価関数ファイルを読み込む
 void load_eval() {
+#if defined(NNUE_HAS_NYUGYOKU_SCALAR_INPUT)
+    // 入玉スカラーはネットに固定したルールで計算する。エンジンの宣言判定のルールと違うと
+    // 評価関数と探索で入玉の勘定が食い違うので知らせる (評価値の計算自体は変わらない)。
+    if (Options.count("EnteringKingRule"))
+    {
+        const std::string expected =
+          NNUE::Layers::kNyugyokuRule == NNUE::Features::NyugyokuScalar::DeclarationRule::Csa24
+            ? "CSARule24"
+            : "CSARule27";
+        const std::string actual = Options["EnteringKingRule"];
+        if (actual != expected)
+            sync_cout << "info string Warning : EnteringKingRule is " << actual
+                      << " but the NNUE entering-king scalars use " << expected << sync_endl;
+    }
+#endif
     // 評価関数パラメーターを読み込み済みであるなら帰る。
     if (eval_loaded)
         return;

@@ -538,6 +538,8 @@
     <ClInclude Include="eval\nnue\features\p.h" />
     <ClInclude Include="eval\nnue\features\pe9.h" />
     <ClInclude Include="eval\nnue\features\nyugyoku_scalar.h" />
+    <ClInclude Include="eval\nnue\layers\nyugyoku_scalar_input_slice.h" />
+    <ClInclude Include="eval\nnue\architectures\halfkp_nyugyoku_256x2-32-32.h" />
     <ClInclude Include="eval\nnue\layers\affine_transform.h" />
     <ClInclude Include="eval\nnue\layers\affine_transform_explicit.h" />
     <ClInclude Include="eval\nnue\layers\affine_transform_sparse_input.h" />

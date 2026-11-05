@@ -24,9 +24,13 @@
 #include <cstdint>
 #include <string>
 
-#include "../../../position.h"
+// position.h は NNUE のアーキテクチャ定義を経由してこのヘッダを include するので、
+// ここでは include せず Position を前方宣言する。
+#include "../../../types.h"
 
 namespace YaneuraOu {
+
+class Position;
 
 namespace Test {
 class UnitTester;
