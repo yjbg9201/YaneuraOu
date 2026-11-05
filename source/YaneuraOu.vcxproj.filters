@@ -211,6 +211,9 @@
     <ClInclude Include="eval\nnue\features\pe9.h">
       <Filter>リソース ファイル\eval\nnue\features</Filter>
     </ClInclude>
+    <ClInclude Include="eval\nnue\features\nyugyoku_scalar.h">
+      <Filter>リソース ファイル\eval\nnue\features</Filter>
+    </ClInclude>
     <ClInclude Include="eval\nnue\architectures\halfkpe9_256x2-32-32.h">
       <Filter>リソース ファイル\eval\nnue\architectures</Filter>
     </ClInclude>
@@ -451,6 +454,9 @@
       <Filter>リソース ファイル\eval\nnue\features</Filter>
     </ClCompile>
     <ClCompile Include="eval\nnue\features\pe9.cpp">
+      <Filter>リソース ファイル\eval\nnue\features</Filter>
+    </ClCompile>
+    <ClCompile Include="eval\nnue\features\nyugyoku_scalar.cpp">
       <Filter>リソース ファイル\eval\nnue\features</Filter>
     </ClCompile>
     <ClCompile Include="eval\material\evaluate_material.cpp">

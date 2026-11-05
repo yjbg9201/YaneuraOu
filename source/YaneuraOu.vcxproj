@@ -537,6 +537,7 @@
     <ClInclude Include="eval\nnue\features\k.h" />
     <ClInclude Include="eval\nnue\features\p.h" />
     <ClInclude Include="eval\nnue\features\pe9.h" />
+    <ClInclude Include="eval\nnue\features\nyugyoku_scalar.h" />
     <ClInclude Include="eval\nnue\layers\affine_transform.h" />
     <ClInclude Include="eval\nnue\layers\affine_transform_explicit.h" />
     <ClInclude Include="eval\nnue\layers\affine_transform_sparse_input.h" />
@@ -623,6 +624,7 @@
     <ClCompile Include="eval\nnue\features\k.cpp" />
     <ClCompile Include="eval\nnue\features\p.cpp" />
     <ClCompile Include="eval\nnue\features\pe9.cpp" />
+    <ClCompile Include="eval\nnue\features\nyugyoku_scalar.cpp" />
     <ClCompile Include="eval\nnue\nnue_test_command.cpp" />
     <ClCompile Include="extra\bitop.cpp" />
     <ClCompile Include="extra\long_effect.cpp" />

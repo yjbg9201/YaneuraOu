@@ -8,6 +8,9 @@
 #include "../misc.h"
 #include "../book/book.h"
 #include "../tt.h"
+#if defined(EVAL_NNUE)
+#include "../eval/nnue/features/nyugyoku_scalar.h"
+#endif
 
 using namespace std;
 namespace YaneuraOu {
@@ -113,6 +116,8 @@ namespace Test
 	//	→　通常のUnitTest
 	//  unittest random_player_loop 1000
 	//  →　ランダムプレイヤーでの自己対局1000回を行うUnitTest
+	//  unittest nyugyoku_scalar_golden path/to/nyugyoku_scalar_golden.tsv
+	//  →　入玉スカラー特徴の golden ファイルの場所を指定する
 
 	void UnitTest(istringstream& is, IEngine& engine)
 	{
@@ -122,15 +127,19 @@ namespace Test
 		// 入力文字列を解釈
 		string token;
 		s64 random_player_loop = 0; // ランダムプレイヤーの対局回数(0を指定するとskip)
+		string nyugyoku_scalar_golden; // 空なら既定の場所を読む
 		while (is >> token)
 		{
 			if (token == "random_player_loop")
 				is >> random_player_loop;
+			else if (token == "nyugyoku_scalar_golden")
+				is >> nyugyoku_scalar_golden;
 		}
 		cout << "random_player_loop : " << random_player_loop << endl;
 
 		// testerのoptionsに代入しておく。
 		tester.options.add("random_player_loop", Option(random_player_loop));
+		tester.options.add("nyugyoku_scalar_golden", Option(nyugyoku_scalar_golden.c_str()));
 
 		// --- 各classに対するUnitTest
 
@@ -154,6 +163,11 @@ namespace Test
 
 		// Misc tools
 		tester.run(Misc::UnitTest);
+
+#if defined(EVAL_NNUE)
+		// 入玉スカラー特徴
+		tester.run(Eval::NNUE::Features::NyugyokuScalar::UnitTest);
+#endif
 
 		// 指し手生成のテスト
 		//tester.run(MoveGen::UnitTest)
