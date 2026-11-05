@@ -1733,6 +1733,9 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
 #if defined(EVAL_NNUE)
     st->accumulator.computed_accumulation = false;
     st->accumulator.computed_score        = false;
+#if defined(NNUE_HAS_NYUGYOKU_SCALAR_INPUT)
+    st->accumulator.computed_nyugyoku     = false;
+#endif
 #endif
 
 #if defined(USE_BOARD_EFFECT_PREV)

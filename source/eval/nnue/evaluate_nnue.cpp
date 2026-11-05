@@ -798,16 +798,78 @@ namespace {
 #if !defined(SFNNwoPSQT)
     // L1 の入力 (FT 出力。入玉スカラーを連結する型ではその直後に入玉スカラー) を作る。
 #if defined(NNUE_HAS_NYUGYOKU_SCALAR_INPUT)
-    constexpr std::size_t kNetworkInputBufferSize = Layers::InputLayer::kOutputDimensions;
-    static_assert(Layers::InputLayer::kFtDimensions == FeatureTransformer::kOutputDimensions);
+    // FT 出力の直後に、L1 が表引きに使う玉 2 つ分の状態 (L1Inputs) を置く。
+    constexpr std::size_t kNetworkInputBufferSize =
+      Layers::NyugyokuL1::kFtDimensions + Layers::NyugyokuL1::kInputStateBytes;
+    static_assert(Layers::NyugyokuL1::kFtDimensions == FeatureTransformer::kOutputDimensions);
 #else
     constexpr std::size_t kNetworkInputBufferSize = FeatureTransformer::kBufferSize;
 #endif
-    static void TransformInput(const Position& pos, TransformedFeatureType* output, bool refresh) {
-        networks().feature_transformer.Transform(pos, output, refresh);
 #if defined(NNUE_HAS_NYUGYOKU_SCALAR_INPUT)
-        Features::NyugyokuScalar::compute(pos, Layers::kNyugyokuRule, Layers::kNyugyokuEncoding,
-                                          output + FeatureTransformer::kOutputDimensions);
+    // 玉ごとの入玉スカラーの L1Inputs を accumulator に用意する。玉の状態 (前進段数・敵陣内の
+    // 駒・持ち駒など) が変わり得るのは、直前の手が
+    //   - 指した側の玉: 駒を取った (持ち駒が増える)・駒を打った・玉を動かした・
+    //     その側の敵陣のマスから動いたか敵陣のマスへ動いた
+    //   - 相手の玉: 駒を取られた
+    // 場合だけなので、それ以外は親局面の値を引き継ぐ (null move は StateInfo ごと複写される)。
+#if !defined(USE_EVAL_LIST)
+#error "the entering-king scalar input reads the last move from StateInfo::dirtyPiece"
+#endif
+    // 評価のたびに通る TransformInput を小さく保ち、FT の差分更新が従来アーキと同じように
+    // ComputeScore へ inline されるよう、こちらは inline しない。
+#if defined(__GNUC__)
+    __attribute__((noinline))
+#elif defined(_MSC_VER)
+    __declspec(noinline)
+#endif
+    static void UpdateNyugyokuInputs(const Position& pos, bool refresh) {
+        namespace NS     = Features::NyugyokuScalar;
+        StateInfo*  st   = pos.state();
+        auto&       acc  = st->accumulator;
+        const auto* prev = st->previous;
+        bool        reuse[COLOR_NB] = {false, false};
+        // 直前の手は dirtyPiece から読む (動いた駒の前後の BonaPiece と、取られた駒)。
+        const auto& dp = st->dirtyPiece;
+        if (!refresh && prev && prev->accumulator.computed_nyugyoku && dp.dirty_num == 1)
+        {
+            const Color mover = ~pos.side_to_move();
+            // 取られた駒は無い (dirty_num == 1) ので、相手の玉の状態は変わらない。
+            reuse[~mover] = true;
+            const BonaPiece from = dp.changed_piece[0].old_piece.fb;
+            const BonaPiece to   = dp.changed_piece[0].new_piece.fb;
+            // 盤上の駒の BonaPiece は fe_hand_end から 81 マスずつの区画に並ぶ (先手から見たマス)。
+            const bool drop = from < fe_hand_end;
+            if (!drop && dp.pieceNo[0] < PIECE_NUMBER_KING)
+            {
+                const Square from_sq = Square((from - fe_hand_end) % SQ_NB);
+                const Square to_sq   = Square((to - fe_hand_end) % SQ_NB);
+                reuse[mover] = !(enemy_field(mover) & from_sq) && !(enemy_field(mover) & to_sq);
+            }
+        }
+        for (const Color c : COLOR)
+            acc.nyugyoku_inputs[c] =
+              reuse[c] ? prev->accumulator.nyugyoku_inputs[c]
+                       : NS::l1_inputs_for(pos, c, Layers::kNyugyokuRule, Layers::kNyugyokuEncoding);
+        acc.computed_nyugyoku = true;
+    }
+#endif
+
+    FORCE_INLINE static void TransformInput(const Position& pos, TransformedFeatureType* output,
+                                            bool refresh) {
+#if defined(NNUE_HAS_NYUGYOKU_SCALAR_INPUT)
+        // 玉の状態は FT と独立なので先に求め、L1 が引く表の行の先読みを FT の差分更新と重ねる。
+        namespace NS = Features::NyugyokuScalar;
+        auto& accumulator = pos.state()->accumulator;
+        if (refresh || !accumulator.computed_nyugyoku)
+            UpdateNyugyokuInputs(pos, refresh);
+        const Color        us        = pos.side_to_move();
+        const NS::L1Inputs states[2] = {accumulator.nyugyoku_inputs[us],
+                                        accumulator.nyugyoku_inputs[~us]};
+        NyugyokuL1Of(networks().network[0]).PrefetchTable(states[0], states[1]);
+        networks().feature_transformer.Transform(pos, output, refresh);
+        std::memcpy(output + FeatureTransformer::kOutputDimensions, states, sizeof(states));
+#else
+        networks().feature_transformer.Transform(pos, output, refresh);
 #endif
     }
 

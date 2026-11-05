@@ -458,6 +458,9 @@ class AffineTransform {
 		return output;
 	}
 
+	// 直前の層 (アーキ定義から特定の層を参照するのに使う)
+	const PreviousLayer& previous_layer() const { return previous_layer_; }
+
    private:
 	// パラメータの型
 	using BiasType   = OutputType;

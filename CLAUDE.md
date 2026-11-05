@@ -32,5 +32,7 @@
   (tatara の量子化 CPU forward との integer-exact 突合用)。
 - `test nn gen_sfens <count> <seed> <out.sfen> [king_walk_percent]`: ランダムプレイアウトの局面
   (一部の対局は玉を前に進めて入玉局面を含める)。
-- `test nn bench_scalar <in.sfen>` / `test nn bench_eval <in.sfen>`: 入玉スカラー 1 回・差分更新
-  つきの評価 1 回の時間。
+- `test nn bench_scalar <in.sfen> [repeat] [full|states|write]` / `test nn bench_eval <in.sfen>`:
+  入玉スカラー 1 回 (内訳: 玉の状態の計算・96 次元の書き込み)・差分更新つきの評価 1 回の時間。
+- `test nn test_nyugyoku_reuse [games]`: 入玉スカラーの L1 入力を親局面から引き継ぐ経路が毎回
+  計算した値と一致するかをランダムプレイアウト (玉を前に進める対局・null move を含む) で確かめる。

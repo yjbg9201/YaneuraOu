@@ -9,6 +9,7 @@
 #include "nnue_test_command.h"
 
 #include <set>
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -371,32 +372,57 @@ void GenSfens(std::istream& stream) {
             << " with a king in the enemy camp) to " << out_path << std::endl;
 }
 
-// 入玉スカラーの計算 1 回 (両玉分 96 次元) の時間を測る。
+// 入玉スカラーの計算 1 回 (両玉分 96 次元) の時間を測る。part で内訳を分けて測れる:
+//   full   : 玉の状態の計算 + 96 次元の書き込み (compute と同じ)
+//   states : 両玉の状態の計算 (popcount など) だけ
+//   write  : 状態を事前に求めておき、96 次元の書き込みだけ
 void BenchScalar(std::istream& stream) {
-  std::string in_path;
+  std::string in_path, part = "full";
   int repeat = 100;
-  stream >> in_path >> repeat;
+  stream >> in_path >> repeat >> part;
   const auto sfens = ReadSfens(in_path);
-  if (sfens.empty() || repeat <= 0) {
-    std::cout << "bench_scalar: usage: test nn bench_scalar <in.sfen> [repeat=100]" << std::endl;
+  if (sfens.empty() || repeat <= 0 || (part != "full" && part != "states" && part != "write")) {
+    std::cout << "bench_scalar: usage: test nn bench_scalar <in.sfen> [repeat=100] "
+                 "[full|states|write]" << std::endl;
     return;
   }
+  namespace NS = Features::NyugyokuScalar;
+  constexpr auto rule = NS::DeclarationRule::Csa27;
+  constexpr auto encoding = NS::ScalarEncoding::Thermometer;
   std::vector<Position> positions(sfens.size());
   std::vector<StateInfo> states(sfens.size());
-  for (size_t i = 0; i < sfens.size(); ++i) positions[i].set(sfens[i], &states[i]);
-  namespace NS = Features::NyugyokuScalar;
-  alignas(64) std::uint8_t out[NS::kDimensions];
+  // write 用: 局面ごとの (手番側, 相手側) の状態と持ち主
+  std::vector<std::array<NS::KingDeclarationState, 2>> king_states(sfens.size());
+  std::vector<Color> stm(sfens.size());
+  for (size_t i = 0; i < sfens.size(); ++i) {
+    positions[i].set(sfens[i], &states[i]);
+    stm[i] = positions[i].side_to_move();
+    king_states[i] = {NS::king_declaration_state(positions[i], stm[i], rule),
+                      NS::king_declaration_state(positions[i], ~stm[i], rule)};
+  }
+  alignas(64) std::uint8_t out[NS::kDimensions] = {};
   std::uint64_t checksum = 0;
   const auto start = std::chrono::steady_clock::now();
   for (int r = 0; r < repeat; ++r)
-    for (const auto& p : positions) {
-      NS::compute(p, NS::DeclarationRule::Csa27, NS::ScalarEncoding::Thermometer, out);
-      checksum += out[r % NS::kDimensions];
+    for (size_t i = 0; i < positions.size(); ++i) {
+      if (part == "full") {
+        NS::compute(positions[i], rule, encoding, out);
+        checksum += out[r % NS::kDimensions];
+      } else if (part == "states") {
+        const auto a = NS::king_declaration_state(positions[i], stm[i], rule);
+        const auto b = NS::king_declaration_state(positions[i], ~stm[i], rule);
+        checksum += a.declaration_points + b.potential_points + a.advance + b.pieces_in_camp;
+      } else {
+        NS::write_king_block(king_states[i][0], stm[i], encoding, out);
+        NS::write_king_block(king_states[i][1], ~stm[i], encoding, out + NS::kBlockDimensions);
+        std::fill(out + 2 * NS::kBlockDimensions, out + NS::kDimensions, std::uint8_t(0));
+        checksum += out[r % NS::kDimensions];
+      }
     }
   const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - start).count();
-  std::cout << "bench_scalar: " << ns / (double(repeat) * positions.size()) << " ns/call ("
-            << positions.size() << " positions x " << repeat << ", checksum " << checksum << ")"
-            << std::endl;
+  std::cout << "bench_scalar " << part << ": " << ns / (double(repeat) * positions.size())
+            << " ns/call (" << positions.size() << " positions x " << repeat << ", checksum "
+            << checksum << ")" << std::endl;
 }
 
 // 差分更新つきの評価 1 回の時間を測る。各局面の合法手ごとに do_move → evaluate → undo_move
@@ -432,6 +458,86 @@ void BenchEval(std::istream& stream) {
   }
   std::cout << "bench_eval: " << ns / evals << " ns/eval (" << evals << " evaluations, checksum "
             << checksum << ")" << std::endl;
+#if defined(NNUE_HAS_NYUGYOKU_SCALAR_INPUT)
+  std::cout << "bench_eval: entering-king scalar L1 table " << Layers::NyugyokuL1::TableBytes()
+            << " bytes" << std::endl;
+#endif
+}
+
+// 入玉スカラーの L1Inputs を親局面から引き継ぐ経路 (evaluate_nnue.cpp の
+// UpdateNyugyokuInputs) が、毎回計算した値と一致することをランダムプレイアウトで確かめる。
+// 一部の対局は玉を前に進める手を優先し (入玉・敵陣の出入り)、ときどき null move を挟む。
+void TestNyugyokuReuse(std::istream& stream) {
+#if defined(NNUE_HAS_NYUGYOKU_SCALAR_INPUT)
+  int games = 200;
+  stream >> games;
+  namespace NS = Features::NyugyokuScalar;
+  constexpr int max_ply = 320;
+  PRNG prng(20261105);
+  Position pos;
+  StateInfo root;
+  auto states = std::make_unique<StateInfo[]>(max_ply);
+  StateInfo null_state;
+  std::uint64_t checks = 0, reused = 0, null_checks = 0;
+  auto verify = [&](const char* where) {
+    Eval::evaluate(pos);
+    const auto& acc = pos.state()->accumulator;
+    for (const Color c : COLOR) {
+      const NS::L1Inputs fresh =
+        NS::l1_inputs_for(pos, c, Layers::kNyugyokuRule, Layers::kNyugyokuEncoding);
+      if (!acc.computed_nyugyoku
+          || std::memcmp(&fresh, &acc.nyugyoku_inputs[c], sizeof(fresh)) != 0) {
+        std::cout << "test_nyugyoku_reuse FAILED (" << where << ") sfen " << pos.sfen() << std::endl;
+        return false;
+      }
+    }
+    ++checks;
+    return true;
+  };
+  for (int game = 0; game < games; ++game) {
+    pos.set_hirate(&root);
+    Eval::compute_eval(pos);
+    const bool king_walk = prng.rand(100) < 50;
+    for (int ply = 0; ply < max_ply; ++ply) {
+      MoveList<LEGAL_ALL> legal(pos);
+      if (legal.size() == 0) break;
+      Move move = legal.begin()[prng.rand(legal.size())];
+      if (king_walk && prng.rand(100) < 60) {
+        const Color us = pos.side_to_move();
+        const Square ksq = pos.square<KING>(us);
+        for (const auto& em : legal) {
+          const Move mv = em;
+          if (mv.from_sq() == ksq && !mv.is_drop()
+              && relative_rank(us, rank_of(mv.to_sq())) < relative_rank(us, rank_of(ksq))) {
+            move = mv;
+            break;
+          }
+        }
+      }
+      const auto parent = pos.state()->accumulator;
+      pos.do_move(move, states[ply]);
+      // 親から引き継いだかどうか (検査の前に数える)
+      const auto prev_inputs = parent.nyugyoku_inputs;
+      if (!verify("do_move")) return;
+      for (const Color c : COLOR)
+        reused += std::memcmp(&prev_inputs[c], &pos.state()->accumulator.nyugyoku_inputs[c],
+                              sizeof(NS::L1Inputs)) == 0;
+      if (!pos.checkers() && prng.rand(100) < 10) {
+        pos.do_null_move(null_state);
+        if (!verify("null move")) return;
+        ++null_checks;
+        pos.undo_null_move();
+      }
+    }
+  }
+  std::cout << "test_nyugyoku_reuse passed: " << games << " games, " << checks
+            << " positions (" << null_checks << " after a null move), unchanged king inputs "
+            << reused << "/" << 2 * (checks - null_checks) << std::endl;
+#else
+  (void)stream;
+  std::cout << "test_nyugyoku_reuse: this architecture has no entering-king scalar input"
+            << std::endl;
+#endif
 }
 
 void TestCommand(Position& pos, std::istream& stream) {
@@ -452,6 +558,8 @@ void TestCommand(Position& pos, std::istream& stream) {
     BenchScalar(stream);
   } else if (sub_command == "bench_eval") {
     BenchEval(stream);
+  } else if (sub_command == "test_nyugyoku_reuse") {
+    TestNyugyokuReuse(stream);
   } else {
     std::cout << "usage:" << std::endl;
     std::cout << " test nn test_features" << std::endl;
@@ -459,8 +567,9 @@ void TestCommand(Position& pos, std::istream& stream) {
     std::cout << " test nn info [path/to/" << kFileName << "...]" << std::endl;
     std::cout << " test nn eval_sfens <in.sfen> <out.tsv>" << std::endl;
     std::cout << " test nn gen_sfens <count> <seed> <out.sfen> [king_walk_percent=30]" << std::endl;
-    std::cout << " test nn bench_scalar <in.sfen> [repeat=100]" << std::endl;
+    std::cout << " test nn bench_scalar <in.sfen> [repeat=100] [full|states|write]" << std::endl;
     std::cout << " test nn bench_eval <in.sfen> [repeat=20]" << std::endl;
+    std::cout << " test nn test_nyugyoku_reuse [games=200]" << std::endl;
   }
 }
 

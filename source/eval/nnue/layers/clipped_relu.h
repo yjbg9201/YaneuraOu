@@ -72,6 +72,9 @@ class ClippedReLU {
     return previous_layer_.WriteParameters(stream);
   }
 
+  // 直前の層 (アーキ定義から特定の層を参照するのに使う)
+  const PreviousLayer& previous_layer() const { return previous_layer_; }
+
   // Forward propagation
   // 順伝播
   const OutputType* Propagate(

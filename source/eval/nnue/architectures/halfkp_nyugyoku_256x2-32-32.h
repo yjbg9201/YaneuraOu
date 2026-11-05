@@ -13,11 +13,10 @@
 #include "../features/half_kp.h"
 
 #include "../layers/affine_transform.h"
-#include "../layers/affine_transform_sparse_input.h"
+#include "../layers/affine_transform_nyugyoku_scalar.h"
 #include "../layers/clipped_relu.h"
-#include "../layers/nyugyoku_scalar_input_slice.h"
 
-// L1 入力に入玉スカラーを連結する (evaluate_nnue.cpp の TransformInput が参照する)。
+// L1 に入玉スカラーの寄与を足す (evaluate_nnue.cpp の TransformInput が参照する)。
 #define NNUE_HAS_NYUGYOKU_SCALAR_INPUT
 // 評価関数ファイルのハッシュ値の不一致を警告でなくエラーにする。
 #define NNUE_STRICT_HASH_CHECK
@@ -37,14 +36,21 @@ namespace Layers {
 
 // Define network structure
 // ネットワーク構造の定義
-using InputLayer   = NyugyokuScalarInputSlice<kTransformedFeatureDimensions * 2>;
-using HiddenLayer1 = ClippedReLU<AffineTransformSparseInput<InputLayer, 32>>;
+// L1 は評価関数ファイル上 AffineTransformSparseInput[32<-608] (FT 出力 512 + 入玉スカラー 96)。
+// 推論では入玉スカラーの部分を表引きで足す (AffineTransformNyugyokuScalar)。
+using NyugyokuL1   = AffineTransformNyugyokuScalar<kTransformedFeatureDimensions * 2, 32>;
+using HiddenLayer1 = ClippedReLU<NyugyokuL1>;
 using HiddenLayer2 = ClippedReLU<AffineTransform<HiddenLayer1, 32>>;
 using OutputLayer  = AffineTransform<HiddenLayer2, 1>;
 
 }  // namespace Layers
 
 using Network = Layers::OutputLayer;
+
+// Network の中の入玉スカラーつき L1 層。
+inline const Layers::NyugyokuL1& NyugyokuL1Of(const Network& network) {
+	return network.previous_layer().previous_layer().previous_layer().previous_layer();
+}
 
 }  // namespace Eval::NNUE
 }  // namespace YaneuraOu
